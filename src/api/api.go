@@ -18,6 +18,7 @@ import (
 
 	"github.com/bbernhard/signal-cli-rest-api/client"
 	ds "github.com/bbernhard/signal-cli-rest-api/datastructs"
+	"github.com/bbernhard/signal-cli-rest-api/storage"
 	utils "github.com/bbernhard/signal-cli-rest-api/utils"
 )
 
@@ -265,12 +266,14 @@ type ClosePollRequest struct {
 
 type Api struct {
 	signalClient *client.SignalClient
+	storage      *storage.Storage
 	wsMutex      sync.Mutex
 }
 
-func NewApi(signalClient *client.SignalClient) *Api {
+func NewApi(signalClient *client.SignalClient, storage *storage.Storage) *Api {
 	return &Api{
 		signalClient: signalClient,
+		storage:      storage,
 	}
 }
 
