@@ -11,6 +11,7 @@ import (
 
 	"github.com/bbernhard/signal-cli-rest-api/api"
 	"github.com/bbernhard/signal-cli-rest-api/client"
+	"github.com/bbernhard/signal-cli-rest-api/storage"
 	docs "github.com/bbernhard/signal-cli-rest-api/docs"
 	"github.com/bbernhard/signal-cli-rest-api/utils"
 	"github.com/gin-gonic/gin"
@@ -169,7 +170,13 @@ func main() {
 		log.Fatal("Couldn't init Signal Client: ", err.Error())
 	}
 
-	api := api.NewApi(signalClient)
+	storageInstance, err := storage.New(*signalCliConfig)
+	if err != nil {
+		log.Fatal("Couldn't init storage: ", err.Error())
+	}
+	defer storageInstance.Close()
+
+	api := api.NewApi(signalClient, storageInstance)
 	v1 := router.Group("/v1")
 	{
 		about := v1.Group("/about")
@@ -209,6 +216,13 @@ func main() {
 		receive := v1.Group("/receive")
 		{
 			receive.GET(":number", api.Receive)
+		}
+
+		messages := v1.Group("/messages")
+		{
+			messages.GET(":number", api.GetMessages)
+			messages.GET(":number/:messageId", api.GetMessage)
+			messages.DELETE(":number/:messageId", api.DeleteMessage)
 		}
 
 		groups := v1.Group("/groups")
