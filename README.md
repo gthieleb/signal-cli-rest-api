@@ -111,6 +111,59 @@ services:
 
 The Swagger API documentation can be found [here](https://bbernhard.github.io/signal-cli-rest-api/). If you prefer a simple text file based API documentation have a look [here](https://github.com/bbernhard/signal-cli-rest-api/blob/master/doc/EXAMPLES.md).
 
+### Message Storage
+
+The REST API can persist received messages to a local SQLite database, allowing you to query message history even after the WebSocket subscriber disconnects.
+
+**Prerequisites:**
+- Works best with `JSON_RPC_RECEIVE_MODE=manual` to prevent message loss
+- Storage is automatically initialized on startup
+
+**Endpoints:**
+
+#### List Messages
+```bash
+curl -X GET 'http://localhost:8080/v1/messages/+NUMBER?limit=100&offset=0'
+```
+
+Query parameters:
+- `limit` - Max results (1-1000, default: 100)
+- `offset` - Pagination offset (default: 0)
+- `since` - Filter by timestamp (unix seconds)
+- `until` - Filter by timestamp (unix seconds)
+- `sender` - Filter by sender number
+- `group` - Filter by group ID
+- `type` - Filter by type (text, attachment, reaction, edit)
+
+Response:
+```json
+{
+  "messages": [
+    {
+      "id": 1,
+      "timestamp": 1716144000,
+      "sender": "+1234567890",
+      "message_type": "text",
+      "body": "Hello!",
+      "read": false
+    }
+  ],
+  "total": 150,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+#### Get Single Message
+```bash
+curl -X GET 'http://localhost:8080/v1/messages/+NUMBER/123'
+```
+
+#### Delete Message
+```bash
+curl -X DELETE 'http://localhost:8080/v1/messages/+NUMBER/123'
+```
+
 ### Blog Posts
 
 - [Running Signal Messenger REST API in Azure Web App for Containers](https://stefanstranger.github.io/2021/06/01/RunningSignalRESTAPIinAppService/) by [@stefanstranger](https://github.com/stefanstranger)
