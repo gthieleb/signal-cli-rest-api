@@ -91,6 +91,16 @@ func main() {
 		log.Fatal("Invalid JSON_RPC_RECEIVE_MODE environment variable set! Must be 'manual' or 'on-start'.")
 	}
 
+	// The fork PoC image deliberately drops signal-cli-native ( GraalVM
+	// native-image build). If the native binary is absent, fall back to the
+	// plain JVM signal-cli instead of failing at startup.
+	if signalCliBinary == "signal-cli-native" {
+		if _, err := exec.LookPath("signal-cli-native"); err != nil {
+			log.Warning("signal-cli-native not found - falling back to signal-cli")
+			signalCliBinary = "signal-cli"
+		}
+	}
+
 	supervisorctlProgramName := "signal-cli-json-rpc-1"
 	supervisorctlLogFolder := "/var/log/" + supervisorctlProgramName
 	_, err := exec.Command("mkdir", "-p", supervisorctlLogFolder).Output()
