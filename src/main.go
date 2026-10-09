@@ -164,17 +164,22 @@ func main() {
 
 	jsonRpc2ClientConfigPathPath := *signalCliConfig + "/jsonrpc2.yml"
 	signalCliApiConfigPath := *signalCliConfig + "/api-config.yml"
-	signalClient := client.NewSignalClient(*signalCliConfig, *attachmentTmpDir, *avatarTmpDir, signalCliMode, jsonRpc2ClientConfigPathPath, signalCliApiConfigPath, webhookUrl)
-	err = signalClient.Init(60)
-	if err != nil {
-		log.Fatal("Couldn't init Signal Client: ", err.Error())
-	}
 
+	// Storage must exist before the SignalClient is initialized: the
+	// json-rpc receive loops persist every envelope into it (the
+	// reconcile poll reads them back via /v1/messages/{number}).
 	storageInstance, err := storage.New(*signalCliConfig)
 	if err != nil {
 		log.Fatal("Couldn't init storage: ", err.Error())
 	}
 	defer storageInstance.Close()
+
+	signalClient := client.NewSignalClient(*signalCliConfig, *attachmentTmpDir, *avatarTmpDir, signalCliMode, jsonRpc2ClientConfigPathPath, signalCliApiConfigPath, webhookUrl)
+	signalClient.SetMessageStore(storageInstance)
+	err = signalClient.Init(60)
+	if err != nil {
+		log.Fatal("Couldn't init Signal Client: ", err.Error())
+	}
 
 	api := api.NewApi(signalClient, storageInstance)
 	v1 := router.Group("/v1")

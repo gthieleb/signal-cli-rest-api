@@ -2,7 +2,6 @@ package storage
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -85,44 +84,30 @@ func initSchema(db *sql.DB) error {
 	return nil
 }
 
+// ErrNotStored signals an envelope without storable message content
+// (delivery/read receipts, typing indicators, call notifications) —
+// StoreMessage treats it as a no-op, not a failure.
+var ErrNotStored = errors.New("envelope has no storable message content")
+
 func (s *Storage) StoreMessage(account string, envelope map[string]interface{}) error {
-	envelopeJSON, err := json.Marshal(envelope)
+	message, err := flattenMessage(account, envelope)
 	if err != nil {
-		return fmt.Errorf("failed to marshal envelope: %w", err)
-	}
-
-	timestamp := extractInt64(envelope, "timestamp")
-	sender := extractString(envelope, "source")
-	recipient := extractString(envelope, "sourceDevice")
-	groupID := extractString(envelope, "groupId")
-	body := extractString(envelope, "message")
-
-	messageType := "text"
-	if _, hasAttachments := envelope["attachments"]; hasAttachments {
-		messageType = "attachment"
-	}
-	if _, hasReaction := envelope["reaction"]; hasReaction {
-		messageType = "reaction"
-	}
-
-	attachments := "[]"
-	if atts, ok := envelope["attachments"]; ok {
-		if attsJSON, err := json.Marshal(atts); err == nil {
-			attachments = string(attsJSON)
+		// Receipts/typing/call-only pushes: nothing storable, not an error.
+		if errors.Is(err, ErrNotStored) {
+			return nil
 		}
+		return err
 	}
 
-	reaction := ""
-	if react, ok := envelope["reaction"]; ok {
-		if reactJSON, err := json.Marshal(react); err == nil {
-			reaction = string(reactJSON)
-		}
+	envelopeJSON := message.EnvelopeJSON
+	if envelopeJSON == "" {
+		envelopeJSON = "{}"
 	}
 
 	_, err = s.db.Exec(`
-		INSERT INTO messages (account, timestamp, sender, recipient, group_id, message_type, body, attachments, reaction, envelope_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, account, timestamp, sender, recipient, groupID, messageType, body, attachments, reaction, string(envelopeJSON))
+		INSERT INTO messages (account, timestamp, sender, recipient, group_id, message_type, body, attachments, reaction, edit_history, envelope_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, message.Account, message.Timestamp, message.Sender, message.Recipient, message.GroupID, message.MessageType, message.Body, message.Attachments, message.Reaction, message.EditHistory, envelopeJSON)
 
 	if err != nil {
 		return fmt.Errorf("failed to store message: %w", err)

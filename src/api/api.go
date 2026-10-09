@@ -573,8 +573,6 @@ func (a *Api) SendV2(c *gin.Context) {
 			c.JSON(400, Error{Msg: err.Error()})
 			return
 		}
-		c.JSON(400, Error{Msg: err.Error()})
-		return
 	}
 
 	c.JSON(201, SendMessageResponse{Timestamp: strconv.FormatInt((*data)[0].Timestamp, 10)})

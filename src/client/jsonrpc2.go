@@ -72,10 +72,13 @@ type JsonRpc2Client struct {
 	receiveSubscriptions      map[string]*receiveSubscription // account -> sub state
 	channelAccountByUuid      map[string]string               // channelUuid -> account
 	signalCliApiConfig        *utils.SignalCliApiConfig
+	messageStore              MessageStore // optional persistence sink (nil = off)
 	number                    string
 	receivedMessagesMutex     sync.Mutex
 	receivedResponsesMutex    sync.Mutex
 	receiveSubscriptionsMutex sync.Mutex
+	receiveModeMutex          sync.Mutex
+	manualReceiveModeOverride *bool // test seam; nil = derive from env
 	address                   string
 }
 
@@ -88,6 +91,13 @@ func NewJsonRpc2Client(signalCliApiConfig *utils.SignalCliApiConfig, number stri
 		receiveSubscriptions:     make(map[string]*receiveSubscription),
 		channelAccountByUuid:     make(map[string]string),
 	}
+}
+
+// SetMessageStore attaches the message persistence sink used by the
+// receive loop. Optional dependency: a nil store disables persistence
+// (used in tests and when storage init failed).
+func (r *JsonRpc2Client) SetMessageStore(store MessageStore) {
+	r.messageStore = store
 }
 
 func (r *JsonRpc2Client) Dial(address string, maxRetries int) error {
@@ -263,6 +273,12 @@ func (r *JsonRpc2Client) ReceiveData(number string, receiveWebhookUrl string) {
 				resp1.Params = manualWrapper.Result
 			}
 
+			// Persist before broadcasting: the reconcile poll reads the
+			// store, so an envelope must survive even when no websocket
+			// subscriber is attached. Sink semantics — a storage failure
+			// must never break the broadcast loop below.
+			persistReceivedMessage(r.messageStore, r.number, resp1.Params)
+
 			r.receivedMessagesMutex.Lock()
 			for _, c := range r.receivedMessagesChannels {
 				select {
@@ -346,7 +362,11 @@ func (r *JsonRpc2Client) acquireReceiveSubscription(account string) error {
 }
 
 // releaseReceiveSubscription decrements the per-account refcount and
-// cancels the subscription with signal-cli if it drops to zero.
+// cancels the subscription with signal-cli if it drops to zero. The
+// boot-time subscription (EnsureReceiveSubscription) is never torn down:
+// its refcount floor keeps the account subscribed even when every
+// websocket subscriber has detached (REST pollers depend on the
+// resulting notification stream for the message store).
 func (r *JsonRpc2Client) releaseReceiveSubscription(account string) {
 	r.receiveSubscriptionsMutex.Lock()
 	defer r.receiveSubscriptionsMutex.Unlock()
@@ -365,6 +385,42 @@ func (r *JsonRpc2Client) releaseReceiveSubscription(account string) {
 		log.Infof("Unsubscribed from receive notifications for account %s (subscription=%d)", account, sub.id)
 	}
 	delete(r.receiveSubscriptions, account)
+}
+
+// EnsureReceiveSubscription establishes the boot-time receive
+// subscription in manual receive-mode. Without it, an account in manual
+// mode stays unsubscribed until the first websocket subscriber attaches
+// and envelopes remain queued in signal-cli forever — breaking any
+// consumer that only polls REST (message store / reconcile poll).
+//
+// The subscription is marked internal: its refcount floor is never
+// released by websocket detach, so it survives for the process lifetime.
+// signal-cli deduplicates the underlying receive loop per manager, so a
+// later websocket subscribeReceive for the same account doesn't cause
+// duplicate deliveries — it only adds another handler fan-out target.
+//
+// Returns whether a subscription was acquired (false: not manual mode,
+// subscription already present, or the RPC failed).
+func (r *JsonRpc2Client) EnsureReceiveSubscription() bool {
+	if !r.manualReceiveMode() {
+		return false
+	}
+
+	r.receiveSubscriptionsMutex.Lock()
+	defer r.receiveSubscriptionsMutex.Unlock()
+
+	if _, ok := r.receiveSubscriptions[r.number]; ok {
+		return false
+	}
+
+	id, err := r.subscribeReceive(r.number)
+	if err != nil {
+		log.Error("Boot-time subscribeReceive failed for account ", r.number, ": ", err.Error())
+		return false
+	}
+	r.receiveSubscriptions[r.number] = &receiveSubscription{id: id, refcount: baseSubscriptionRefCount}
+	log.Infof("Boot-time subscription active for account %s (subscription=%d)", r.number, id)
+	return true
 }
 
 // GetReceiveChannel returns a channel that will receive messages for the

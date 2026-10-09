@@ -404,6 +404,7 @@ type SignalClient struct {
 	signalCliApiConfig       *utils.SignalCliApiConfig
 	cliClient                *CliClient
 	receiveWebhookUrl        string
+	messageStore             MessageStore
 }
 
 func NewSignalClient(signalCliConfig string, attachmentTmpDir string, avatarTmpDir string, signalCliMode SignalCliMode,
@@ -418,6 +419,13 @@ func NewSignalClient(signalCliConfig string, attachmentTmpDir string, avatarTmpD
 		signalCliApiConfigPath:   signalCliApiConfigPath,
 		receiveWebhookUrl:        receiveWebhookUrl,
 	}
+}
+
+// SetMessageStore attaches the message persistence sink. It must be
+// called before Init: Init hands it to every json-rpc client (per-number
+// receive loops persist there). A nil store disables persistence.
+func (s *SignalClient) SetMessageStore(store MessageStore) {
+	s.messageStore = store
 }
 
 func (s *SignalClient) GetSignalCliMode() SignalCliMode {
@@ -441,10 +449,18 @@ func (s *SignalClient) Init(maxRetries int) error {
 		tcpPortsNumberMapping := s.jsonRpc2ClientConfig.GetTcpPortsForNumbers()
 		for number, tcpPort := range tcpPortsNumberMapping {
 			s.jsonRpc2Clients[number] = NewJsonRpc2Client(s.signalCliApiConfig, number)
+			s.jsonRpc2Clients[number].SetMessageStore(s.messageStore)
 			err := s.jsonRpc2Clients[number].Dial("127.0.0.1:"+strconv.FormatInt(tcpPort, 10), maxRetries)
 			if err != nil {
 				return err
 			}
+
+			// In manual receive-mode the account must be subscribed even
+			// when no websocket subscriber ever attaches (REST-only
+			// deployments poll the message store instead). Signal-cli
+			// deduplicates the underlying receive loop per manager, so
+			// later websocket subscriptions don't duplicate deliveries.
+			s.jsonRpc2Clients[number].EnsureReceiveSubscription()
 
 			go s.jsonRpc2Clients[number].ReceiveData(number, s.receiveWebhookUrl) //receive messages in goroutine
 		}
