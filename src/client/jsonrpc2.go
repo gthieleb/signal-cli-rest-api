@@ -183,8 +183,21 @@ func (r *JsonRpc2Client) getRaw(command string, account *string, args interface{
 	r.receivedResponsesById[u.String()] = responseChan
 	r.receivedResponsesMutex.Unlock()
 
+	// Response timeout: a hung daemon must not leak the caller forever
+	// (json-rpc has no read deadline on the raw conn). Failure cleanup
+	// mirrors the success path so a late reply finds no dangling entry.
+	responseTimeout := time.NewTimer(30 * time.Second)
+	defer responseTimeout.Stop()
+
 	var resp JsonRpc2MessageResponse
-	resp = <-responseChan
+	select {
+	case resp = <-responseChan:
+	case <-responseTimeout.C:
+		r.receivedResponsesMutex.Lock()
+		delete(r.receivedResponsesById, u.String())
+		r.receivedResponsesMutex.Unlock()
+		return "", fmt.Errorf("json-rpc request %s timed out after 30s", command)
+	}
 
 	r.receivedResponsesMutex.Lock()
 	delete(r.receivedResponsesById, u.String())
@@ -317,9 +330,21 @@ func (r *JsonRpc2Client) ReceiveData(number string, receiveWebhookUrl string) {
 // signal-cli was launched with --receive-mode=manual; in auto mode the
 // daemon pushes notifications without an explicit subscribe call.
 // Returns the subscription id assigned by signal-cli.
+//
+// The MULTI_ACCOUNT_NUMBER sentinel ("<multi-account>", the jsonrpc2.yml
+// key) is NOT a registered number — passing it as params.account makes the
+// daemon fail with NotRegisteredException. With no account param the
+// daemon dispatches the multi-command variant instead, which subscribes
+// every manager AND every manager added later (onManagerAdded) — exactly
+// what a REST-only deployment needs (SignalJsonRpcDispatcherHandler.
+// handleConnection(MultiAccountManager) semantics).
 func (r *JsonRpc2Client) subscribeReceive(account string) (int64, error) {
 	type subscribeReceiveArgs struct{}
-	resultStr, err := r.getRaw("subscribeReceive", &account, subscribeReceiveArgs{})
+	var accountPtr *string
+	if account != utils.MULTI_ACCOUNT_NUMBER {
+		accountPtr = &account
+	}
+	resultStr, err := r.getRaw("subscribeReceive", accountPtr, subscribeReceiveArgs{})
 	if err != nil {
 		return 0, err
 	}

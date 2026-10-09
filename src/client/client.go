@@ -455,14 +455,20 @@ func (s *SignalClient) Init(maxRetries int) error {
 				return err
 			}
 
+			// The receive loop MUST be running before any JSON-RPC
+			// request is issued on the same connection: getRaw blocks
+			// on a response channel that only ReceiveData feeds.
+			go s.jsonRpc2Clients[number].ReceiveData(number, s.receiveWebhookUrl) //receive messages in goroutine
+
 			// In manual receive-mode the account must be subscribed even
 			// when no websocket subscriber ever attaches (REST-only
 			// deployments poll the message store instead). Signal-cli
 			// deduplicates the underlying receive loop per manager, so
 			// later websocket subscriptions don't duplicate deliveries.
-			s.jsonRpc2Clients[number].EnsureReceiveSubscription()
-
-			go s.jsonRpc2Clients[number].ReceiveData(number, s.receiveWebhookUrl) //receive messages in goroutine
+			// Async: Init must not block on the daemon's reply (a slow or
+			// absent manager must not delay API startup — the REST layer
+			// answers /v1/about etc. regardless of receive state).
+			go s.jsonRpc2Clients[number].EnsureReceiveSubscription()
 		}
 	} else {
 		s.cliClient = NewCliClient(s.signalCliMode, s.signalCliApiConfig)
