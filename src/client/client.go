@@ -1631,6 +1631,16 @@ func (s *SignalClient) DeleteGroup(number string, groupId string) error {
 	}
 }
 
+// importHistoryEnabled reports whether device linking should request message
+// history import. The bundled signal-cli fork (gthieleb/signal-cli @ 218d625,
+// AsamK PR #2134 history-transfer) accepts an optional "importHistory" option
+// on the startLink/finishLink JSON-RPC methods - when enabled, the QR link
+// advertises history capability and finishLink pulls the message archive.
+// Controlled via SIGNAL_IMPORT_HISTORY ("true"/"false"), default true.
+func (s *SignalClient) importHistoryEnabled() bool {
+	return utils.GetEnv("SIGNAL_IMPORT_HISTORY", "true") != "false"
+}
+
 func (s *SignalClient) GetQrCodeLink(deviceName string, qrCodeVersion int) ([]byte, error) {
 	if s.signalCliMode == JsonRpc {
 		jsonRpc2Client, err := s.getJsonRpc2Client()
@@ -1638,12 +1648,19 @@ func (s *SignalClient) GetQrCodeLink(deviceName string, qrCodeVersion int) ([]by
 			return []byte{}, err
 		}
 
-		type StartRequest struct{}
+		importHistory := s.importHistoryEnabled()
+		type StartRequest struct {
+			ImportHistory bool `json:"importHistory,omitempty"`
+		}
 		type Response struct {
 			DeviceLinkUri string `json:"deviceLinkUri"`
 		}
 
-		result, err := jsonRpc2Client.getRaw("startLink", nil, &StartRequest{})
+		startRequest := StartRequest{}
+		if importHistory {
+			startRequest.ImportHistory = true
+		}
+		result, err := jsonRpc2Client.getRaw("startLink", nil, &startRequest)
 		if err != nil {
 			return []byte{}, errors.New("Couldn't create QR code: " + err.Error())
 		}
@@ -1695,12 +1712,20 @@ func (s *SignalClient) GetDeviceLinkUri(deviceName string) (string, error) {
 		type StartResponse struct {
 			DeviceLinkUri string `json:"deviceLinkUri"`
 		}
+		importHistory := s.importHistoryEnabled()
+		type StartRequest struct {
+			ImportHistory bool `json:"importHistory,omitempty"`
+		}
 		jsonRpc2Client, err := s.getJsonRpc2Client()
 		if err != nil {
 			return "", err
 		}
 
-		raw, err := jsonRpc2Client.getRaw("startLink", nil, struct{}{})
+		startRequest := StartRequest{}
+		if importHistory {
+			startRequest.ImportHistory = true
+		}
+		raw, err := jsonRpc2Client.getRaw("startLink", nil, &startRequest)
 		if err != nil {
 			return "", errors.New("Couldn't start link: " + err.Error())
 		}
@@ -1724,13 +1749,21 @@ func (s *SignalClient) GetDeviceLinkUri(deviceName string) (string, error) {
 }
 
 func (s *SignalClient) finishLinkAsync(jsonRpc2Client *JsonRpc2Client, deviceName string, deviceLinkUri string) {
+	// signal-cli fork (gthieleb/signal-cli @ 218d625, AsamK PR #2134):
+	// finishLink accepts an optional "importHistory" flag (default false
+	// upstream) - when true the daemon requests the message archive during
+	// device linking, so the new device imports existing chat history.
 	type finishRequest struct {
 		DeviceLinkUri string `json:"deviceLinkUri"`
 		DeviceName    string `json:"deviceName"`
+		ImportHistory bool   `json:"importHistory,omitempty"`
 	}
 
 	go func() {
 		req := finishRequest{DeviceLinkUri: deviceLinkUri, DeviceName: deviceName}
+		if s.importHistoryEnabled() {
+			req.ImportHistory = true
+		}
 		result, err := jsonRpc2Client.getRaw("finishLink", nil, &req)
 		if err != nil {
 			log.Debug("Error linking device: ", err.Error())

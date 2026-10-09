@@ -66,17 +66,17 @@ type receiveSubscription struct {
 }
 
 type JsonRpc2Client struct {
-	conn                       net.Conn
-	receivedResponsesById      map[string]chan JsonRpc2MessageResponse
-	receivedMessagesChannels   map[string]chan JsonRpc2ReceivedMessage
-	receiveSubscriptions       map[string]*receiveSubscription // account -> sub state
-	channelAccountByUuid       map[string]string               // channelUuid -> account
-	signalCliApiConfig         *utils.SignalCliApiConfig
-	number                     string
-	receivedMessagesMutex      sync.Mutex
-	receivedResponsesMutex     sync.Mutex
-	receiveSubscriptionsMutex  sync.Mutex
-	address                    string
+	conn                      net.Conn
+	receivedResponsesById     map[string]chan JsonRpc2MessageResponse
+	receivedMessagesChannels  map[string]chan JsonRpc2ReceivedMessage
+	receiveSubscriptions      map[string]*receiveSubscription // account -> sub state
+	channelAccountByUuid      map[string]string               // channelUuid -> account
+	signalCliApiConfig        *utils.SignalCliApiConfig
+	number                    string
+	receivedMessagesMutex     sync.Mutex
+	receivedResponsesMutex    sync.Mutex
+	receiveSubscriptionsMutex sync.Mutex
+	address                   string
 }
 
 func NewJsonRpc2Client(signalCliApiConfig *utils.SignalCliApiConfig, number string) *JsonRpc2Client {

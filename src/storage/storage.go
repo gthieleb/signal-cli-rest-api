@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,9 @@ import (
 type Storage struct {
 	db *sql.DB
 }
+
+// ErrMessageNotFound is returned when no message matches the given id.
+var ErrMessageNotFound = errors.New("message not found")
 
 type Message struct {
 	ID           int64  `json:"id"`
@@ -92,7 +96,7 @@ func (s *Storage) StoreMessage(account string, envelope map[string]interface{}) 
 	recipient := extractString(envelope, "sourceDevice")
 	groupID := extractString(envelope, "groupId")
 	body := extractString(envelope, "message")
-	
+
 	messageType := "text"
 	if _, hasAttachments := envelope["attachments"]; hasAttachments {
 		messageType = "attachment"
@@ -220,7 +224,7 @@ func (s *Storage) DeleteMessage(account string, messageID int64) error {
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("message not found")
+		return ErrMessageNotFound
 	}
 	return nil
 }

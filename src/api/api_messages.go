@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/url"
 	"strconv"
 
@@ -136,7 +137,7 @@ func (a *Api) DeleteMessage(c *gin.Context) {
 
 	err = a.storage.DeleteMessage(number, messageId)
 	if err != nil {
-		if err.Error() == "message not found" {
+		if errors.Is(err, storage.ErrMessageNotFound) {
 			c.JSON(404, Error{Msg: "Message not found"})
 			return
 		}

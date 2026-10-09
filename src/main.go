@@ -11,8 +11,8 @@ import (
 
 	"github.com/bbernhard/signal-cli-rest-api/api"
 	"github.com/bbernhard/signal-cli-rest-api/client"
-	"github.com/bbernhard/signal-cli-rest-api/storage"
 	docs "github.com/bbernhard/signal-cli-rest-api/docs"
+	"github.com/bbernhard/signal-cli-rest-api/storage"
 	"github.com/bbernhard/signal-cli-rest-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
